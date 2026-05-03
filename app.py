@@ -6,7 +6,7 @@ import plotly.express as px
 # LOAD DATA
 # =========================
 tracks = pd.read_csv(
-    "data/FMA/fma_metadata/tracks.csv",
+    "data/tracks.csv",
     header=[0, 1],
     index_col=0
 )
