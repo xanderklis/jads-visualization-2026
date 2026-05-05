@@ -105,7 +105,7 @@ PT = dict(
     xaxis=dict(gridcolor=C["border"], zerolinecolor=C["border"], tickfont_size=10),
     yaxis=dict(gridcolor=C["border"], zerolinecolor=C["border"], tickfont_size=10),
     hoverlabel=dict(bgcolor=C["card"], bordercolor=C["border"],
-                    font_family=C["mono"], font_size=11),
+                    font_family=C["mono"], font_size=11, font_color=C["text"]),
     legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor=C["border"],
                 font=dict(family=C["mono"], size=10, color=C["muted"])),
 )
