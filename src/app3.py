@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 # LOAD DATA
 # =========================
 tracks = pd.read_csv(
-    "data/tracks.csv",
+    "../data/tracks.csv",
     header=[0, 1],
     index_col=0
 )
