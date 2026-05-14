@@ -351,7 +351,7 @@ def update_charts(sel_genres, checks, max_tracks):
     # ── 2. Genre trend over time ───────────────────────────────────
     trend_df = tracks.dropna(subset=["track_genre_top", "year"]).copy()
     trend_df["year"] = trend_df["year"].astype(int)
-    trend_df = trend_df[trend_df["year"].between(1990, 2024)]
+    trend_df = trend_df[trend_df["year"].between(1990, 2016)]
     if sel_genres:
         trend_df  = trend_df[trend_df["track_genre_top"].isin(sel_genres)]
         top_genres = sel_genres
