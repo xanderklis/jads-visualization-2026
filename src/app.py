@@ -5,78 +5,8 @@ import plotly.graph_objects as go
 # =========================
 # LOAD DATA
 # =========================
-tracks = pd.read_csv(
-    "../data/tracks.csv",
-    header=[0, 1],
-    index_col=0
-)
-tracks.columns = ['_'.join(col) for col in tracks.columns.values]
-
-tracks["year"]               = pd.to_datetime(tracks["album_date_released"], errors="coerce").dt.year
-tracks["track_listens"]      = pd.to_numeric(tracks["track_listens"],   errors="coerce")
-tracks["track_favorites"]    = pd.to_numeric(tracks["track_favorites"], errors="coerce")
-
-# estimated Spotify revenue: $0.004 per stream
-tracks["estimated_revenue"]  = tracks["track_listens"] * 0.004
-
-# =========================
-# ARTIST-LEVEL AGGREGATION
-# =========================
-def build_artist_df(track_df):
-    grp = track_df.groupby("artist_name")
-
-    agg = pd.DataFrame({
-        "track_count":     grp["track_listens"].count(),
-        "avg_listens":     grp["track_listens"].mean(),
-        "max_listens":     grp["track_listens"].max(),
-        "career_start":    grp["year"].min(),
-        "genres":          grp["track_genre_top"].agg(lambda x: ", ".join(x.dropna().unique())),
-        "total_missing":   grp.apply(lambda x: x.isna().sum().sum()),
-        "total_fields":    grp.apply(lambda x: x.shape[0] * x.shape[1]),
-        "total_revenue":   grp["estimated_revenue"].sum(),
-        "avg_revenue":     grp["estimated_revenue"].mean(),
-    }).reset_index()
-
-    # one-hit wonder ratio
-    agg["ratio"] = agg["max_listens"] / (agg["avg_listens"] + 1)
-
-    # missing data percentage per artist (underground signal)
-    agg["missing_pct"] = (agg["total_missing"] / agg["total_fields"] * 100).round(1)
-
-    # avg_listens top 20% threshold
-    p80 = agg["avg_listens"].quantile(0.80)
-    agg["top_20pct_listens"] = agg["avg_listens"] >= p80
-
-    # career start relative to max year in dataset
-    max_year = agg["career_start"].max()
-    agg["early_career"] = agg["career_start"] >= (max_year - 5)
-
-    # label status
-    label_col = "artist_associated_labels"
-    if label_col in track_df.columns:
-        label_map = track_df.groupby("artist_name")[label_col].first()
-        agg["has_label"] = agg["artist_name"].map(label_map).notna()
-        agg["has_label"] = (
-            agg["has_label"] &
-            agg["artist_name"].map(label_map).fillna("").astype(str).str.strip().ne("")
-        )
-    else:
-        agg["has_label"] = False
-
-    # talent flag: early career + few tracks + top 20% listens + no label
-    agg["is_talent"] = (
-        agg["early_career"] &
-        (agg["track_count"] < 10) &
-        agg["top_20pct_listens"] &
-        ~agg["has_label"]
-    )
-
-    # one-hit wonder flag
-    agg["is_one_hit"] = (agg["ratio"] > 5) & (agg["track_count"] > 1)
-
-    return agg
-
-artists_df = build_artist_df(tracks)
+tracks = pd.read_csv("data/tracks_clean.csv")
+artists_df = pd.read_csv("data/artists_clean.csv")
 
 # =========================
 # APP INIT
@@ -121,7 +51,9 @@ PT = dict(
 # =========================
 # LAYOUT HELPERS
 # =========================
-def section_label(txt):
+
+# Ever heard of docstrings????????? It is unclear to me what these do
+def section_label(txt): 
     return html.P(txt, style={
         "fontFamily": C["mono"], "fontSize": "9px", "letterSpacing": "2.5px",
         "color": C["accent"], "textTransform": "uppercase", "margin": "0 0 10px 0",
@@ -466,11 +398,11 @@ def update_charts(sel_genres, checks, max_tracks):
         **PT,
     )
 
-    # ── 4. Emerging genres ────────────────────────────────────────
-    new_artists = artists_df[artists_df["early_career"]]["artist_name"]
-    new_tracks  = tracks[tracks["artist_name"].isin(new_artists)]
+    # Line graph for genre trends over time
+    new_artists = artists_df[artists_df["early_career"]]["artist_name"] # What is early career...?
+    new_tracks  = tracks[tracks["artist_name"].isin(new_artists)] # Who are these????
     if sel_genres:
-        new_tracks = new_tracks[new_tracks["track_genre_top"].isin(sel_genres)]
+        new_tracks = new_tracks[new_tracks["track_genre_top"].isin(sel_genres)] # Wtf is sel_genres????
     emerging = (new_tracks["track_genre_top"]
                 .value_counts().head(12).reset_index())
     emerging.columns = ["genre", "count"]
