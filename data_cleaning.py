@@ -72,8 +72,10 @@ def build_artist_df(track_df):
 
     return agg
 
-artists_df = build_artist_df(tracks)
+# Executing the file
+if __name__ == "__main__":
+    artists_df = build_artist_df(tracks)
 
-# Saving the files to .csv
-artists_df.to_csv("data/artists_clean.csv")
-tracks.to_csv("data/tracks_clean.csv")
+    # Saving the files to .csv
+    artists_df.to_csv("data/artists_clean.csv")
+    tracks.to_csv("data/tracks_clean.csv")
