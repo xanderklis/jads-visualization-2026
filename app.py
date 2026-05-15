@@ -1,104 +1,21 @@
 from dash import Dash, html, dcc, Input, Output, ctx
 import pandas as pd
 import plotly.graph_objects as go
+from src.theme import C, PT
+from src.components import card, stat_block, tag, section_label, field_label, fmt_revenue
+from src.logic import apply_filters
 
-# =========================
-# LOAD DATA
-# =========================
+
+# Load the data
 tracks = pd.read_csv("data/tracks_clean.csv")
 artists_df = pd.read_csv("data/artists_clean.csv")
 
-# =========================
-# APP INIT
-# =========================
+# Initialize the app
 app = Dash(__name__)
 
 genres = sorted(tracks["track_genre_top"].dropna().unique())
 
-# =========================
-# THEME
-# =========================
-C = {
-    "bg":      "#0f0f0f",
-    "panel":   "#161616",
-    "card":    "#1c1c1c",
-    "border":  "#272727",
-    "accent":  "#f5a623",
-    "accent2": "#e05c2a",
-    "teal":    "#4ecdc4",
-    "green":   "#86efac",
-    "text":    "#ede8df",
-    "muted":   "#6b6560",
-    "serif":   "Georgia, 'Times New Roman', serif",
-    "mono":    "'Courier New', Courier, monospace",
-}
-
-PT = dict(
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family=C["mono"], color=C["text"], size=11),
-    title_font=dict(family=C["serif"], size=15, color=C["text"]),
-    title_x=0.03,
-    margin=dict(l=44, r=16, t=46, b=40),
-    xaxis=dict(gridcolor=C["border"], zerolinecolor=C["border"], tickfont_size=10),
-    yaxis=dict(gridcolor=C["border"], zerolinecolor=C["border"], tickfont_size=10),
-    hoverlabel=dict(bgcolor=C["card"], bordercolor=C["border"],
-                    font_family=C["mono"], font_size=11, font_color=C["text"]),
-    legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor=C["border"],
-                font=dict(family=C["mono"], size=10, color=C["muted"])),
-)
-
-# =========================
-# LAYOUT HELPERS
-# =========================
-
-# Ever heard of docstrings????????? It is unclear to me what these do
-def section_label(txt): 
-    return html.P(txt, style={
-        "fontFamily": C["mono"], "fontSize": "9px", "letterSpacing": "2.5px",
-        "color": C["accent"], "textTransform": "uppercase", "margin": "0 0 10px 0",
-    })
-
-def field_label(txt):
-    return html.Div(txt, style={
-        "fontSize": "10px", "color": C["muted"], "marginBottom": "4px",
-    })
-
-def card(*children, style=None):
-    base = {"background": C["card"], "border": f"1px solid {C['border']}",
-            "borderRadius": "3px", "padding": "8px"}
-    if style:
-        base.update(style)
-    return html.Div(list(children), style=base)
-
-def stat_block(value, caption, color):
-    return html.Div([
-        html.Div(value, style={"fontFamily": C["serif"], "fontSize": "22px",
-                               "color": color, "lineHeight": "1"}),
-        html.Div(caption, style={"fontFamily": C["mono"], "fontSize": "9px",
-                                 "letterSpacing": "1.5px", "color": C["muted"],
-                                 "textTransform": "uppercase", "marginTop": "3px"}),
-    ], style={"textAlign": "center", "padding": "10px 4px"})
-
-def tag(txt, color=None):
-    col = color or C["accent"]
-    return html.Span(txt, style={
-        "color": col, "fontSize": "9px",
-        "border": f"1px solid {col}",
-        "padding": "1px 6px", "borderRadius": "3px",
-        "marginRight": "4px", "marginBottom": "4px",
-        "display": "inline-block",
-    })
-
-def fmt_revenue(val):
-    if pd.isna(val): return "—"
-    if val >= 1_000_000: return f"${val/1_000_000:.1f}M"
-    if val >= 1_000:     return f"${val/1_000:.1f}K"
-    return f"${val:.2f}"
-
-# =========================
-# LAYOUT
-# =========================
+# App layout
 app.layout = html.Div(style={"background": C["bg"], "minHeight": "100vh",
                               "fontFamily": C["mono"], "color": C["text"]}, children=[
 
@@ -237,29 +154,8 @@ app.layout = html.Div(style={"background": C["bg"], "minHeight": "100vh",
 ])
 
 
-# =========================
-# HELPERS
-# =========================
-def apply_filters(adf, sel_genres, checks, max_tracks):
-    df = adf.copy()
-    if sel_genres:
-        df = df[df["genres"].apply(
-            lambda g: any(genre in str(g) for genre in sel_genres)
-        )]
-    if max_tracks < 50:
-        df = df[df["track_count"] <= max_tracks]
-    if "talent"   in checks: df = df[df["is_talent"]]
-    if "one_hit"  in checks: df = df[df["is_one_hit"]]
-    if "no_label" in checks: df = df[~df["has_label"]]
-    if "early"    in checks: df = df[df["early_career"]]
-    return df
 
-
-# =========================
-# CALLBACKS
-# =========================
-
-# Clear
+# Callbacks
 @app.callback(
     Output("genre-dropdown",    "value"),
     Output("filter-checklist",  "value"),
@@ -650,8 +546,6 @@ def update_artist_panel(talent_click, ohw_click, rev_click):
     ])
 
 
-# =========================
-# RUN
-# =========================
+# Executing the code
 if __name__ == "__main__":
     app.run(debug=True)
