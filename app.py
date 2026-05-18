@@ -7,13 +7,14 @@ from src.logic import apply_filters
 
 
 # Load the data
-tracks = pd.read_csv("data/tracks_clean.csv")
-artists_df = pd.read_csv("data/artists_clean.csv")
+tracks = pd.read_csv("data/clean/tracks_clean.csv")
+artists_df = pd.read_csv("data/clean/artists_clean.csv")
+trends = pd.read_csv("data/clean/trends.csv")
 
 # Initialize the app
 app = Dash(__name__)
 
-genres = sorted(tracks["track_genre_top"].dropna().unique())
+genres = sorted(tracks["track_genre_top"].dropna().unique()) # This needs to go, we can turn this into a .JSON to decrease processing
 
 # App layout
 app.layout = html.Div(style={"background": C["bg"], "minHeight": "100vh",
@@ -244,24 +245,21 @@ def update_charts(sel_genres, checks, max_tracks):
         **PT,
     )
 
-    # ── 2. Genre trend over time ───────────────────────────────────
-    trend_df = tracks.dropna(subset=["track_genre_top", "year"]).copy()
-    trend_df["year"] = trend_df["year"].astype(int)
-    trend_df = trend_df[trend_df["year"].between(1990, 2016)]
+    # Line charts
     if sel_genres:
-        trend_df  = trend_df[trend_df["track_genre_top"].isin(sel_genres)]
+        trend_df  = trends[trends["track_genre_top"].isin(sel_genres)]
         top_genres = sel_genres
     else:
-        top_genres = trend_df["track_genre_top"].value_counts().head(8).index.tolist()
+        top_genres = trends["track_genre_top"].value_counts().head(8).index.tolist() # This ain´t work anymore?
 
-    genre_trend_fig = go.Figure()
+    genre_trend_fig = go.Figure() 
     for i, g in enumerate(top_genres):
-        sub = (trend_df[trend_df["track_genre_top"] == g]
-               .groupby("year").size().reset_index(name="count"))
+        # Count the total amount of track listens per year for each genre
+        sub = (trends[trends["track_genre_top"] == g].groupby("year")["track_listens"].sum().reset_index(name="count"))
         genre_trend_fig.add_trace(go.Scatter(
             x=sub["year"], y=sub["count"], mode="lines", name=g,
             line=dict(color=palette[i % len(palette)], width=2),
-            hovertemplate=f"{g} · %{{x}}: <b>%{{y}}</b> tracks<extra></extra>",
+            hovertemplate=f"{g} · %{{x}}: <b>%{{y}}</b> listens<extra></extra>",
         ))
     genre_trend_fig.update_layout(title="Genre Trends Over Time", **PT)
 
@@ -294,7 +292,7 @@ def update_charts(sel_genres, checks, max_tracks):
         **PT,
     )
 
-    # Line graph for genre trends over time
+    # Emerging genres
     new_artists = artists_df[artists_df["early_career"]]["artist_name"] # What is early career...?
     new_tracks  = tracks[tracks["artist_name"].isin(new_artists)] # Who are these????
     if sel_genres:

@@ -2,7 +2,7 @@ from dash import html
 from .theme import C
 import pandas as pd
 
-# This is why you don´t let Claude do everything, I don´t know what all this damn code does
+# This is why you don´t let Claude do everything, I don´t know what all this damn code does -Xander
 def section_label(txt): 
     return html.P(txt, style={
         "fontFamily": C["mono"], "fontSize": "9px", "letterSpacing": "2.5px",
