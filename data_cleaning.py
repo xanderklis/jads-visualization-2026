@@ -1,7 +1,8 @@
 import pandas as pd
 
+# Load the raw data
 tracks = pd.read_csv(
-    "data/tracks.csv",
+    "data/raw/tracks.csv",
     header=[0, 1],
     index_col=0
 )
@@ -72,10 +73,16 @@ def build_artist_df(track_df):
 
     return agg
 
+trend_df = tracks.dropna(subset=["track_genre_top", "year"]).copy()
+trend_df["year"] = trend_df["year"].astype(int)
+trend_df = trend_df[trend_df["year"].between(1990, 2016)] # Filter between 1990 and 2016
+trend_df = trend_df[["track_genre_top","year","track_listens"]]
+
 # Executing the file
 if __name__ == "__main__":
     artists_df = build_artist_df(tracks)
 
     # Saving the files to .csv
-    artists_df.to_csv("data/artists_clean.csv")
-    tracks.to_csv("data/tracks_clean.csv")
+    artists_df.to_csv("data/clean/artists_clean.csv")
+    tracks.to_csv("data/clean/tracks_clean.csv")
+    trend_df.to_csv("data/clean/trends.csv")
