@@ -1,4 +1,4 @@
-from dash import Dash, html, dcc, Input, Output, ctx
+from dash import Dash, html, dcc, Input, Output, State, ctx
 import pandas as pd
 import plotly.graph_objects as go
 from src.theme import C, PT
@@ -7,18 +7,30 @@ from src.logic import apply_filters
 
 
 # Load the data
-tracks = pd.read_csv("data/clean/tracks_clean.csv")
+tracks     = pd.read_csv("data/clean/tracks_clean.csv")
 artists_df = pd.read_csv("data/clean/artists_clean.csv")
-trends = pd.read_csv("data/clean/trends.csv")
+trends     = pd.read_csv("data/clean/trends.csv")
 
 # Initialize the app
-app = Dash(__name__)
+app = Dash(__name__, suppress_callback_exceptions=True)
 
 genres = sorted(tracks["track_genre_top"].dropna().unique()) # This needs to go, we can turn this into a .JSON to decrease processing
+
+# Shared state stores
+# brushed_genre:    genre clicked in genre-trend (string or None)
+# brushed_artists:  artists clicked in talent-scatter (list or None)
+# highlighted_artist: artist clicked in one-hit-scatter (string or None)
+stores = [
+    dcc.Store(id="brushed-genre",      data=None),
+    dcc.Store(id="brushed-artists",    data=None),
+    dcc.Store(id="highlighted-artist", data=None),
+]
 
 # App layout
 app.layout = html.Div(style={"background": C["bg"], "minHeight": "100vh",
                               "fontFamily": C["mono"], "color": C["text"]}, children=[
+
+    *stores,
 
     # HEADER
     html.Div(style={
@@ -155,17 +167,61 @@ app.layout = html.Div(style={"background": C["bg"], "minHeight": "100vh",
 ])
 
 
-
 # Callbacks
+
+# Single callback handling clear + all 3 linking interactions
 @app.callback(
-    Output("genre-dropdown",    "value"),
-    Output("filter-checklist",  "value"),
-    Output("track-count-slider","value"),
-    Input("clear-btn", "n_clicks"),
+    Output("genre-dropdown",     "value"),
+    Output("filter-checklist",   "value"),
+    Output("track-count-slider", "value"),
+    Output("brushed-genre",      "data"),
+    Output("brushed-artists",    "data"),
+    Output("highlighted-artist", "data"),
+    Input("clear-btn",       "n_clicks"),
+    Input("genre-trend",     "clickData"),
+    Input("talent-scatter",  "clickData"),
+    Input("one-hit-scatter", "clickData"),
+    State("genre-dropdown",     "value"),
+    State("filter-checklist",   "value"),
+    State("track-count-slider", "value"),
+    State("brushed-genre",      "data"),
+    State("brushed-artists",    "data"),
+    State("highlighted-artist", "data"),
     prevent_initial_call=True,
 )
-def clear_filters(_):
-    return None, [], 50
+def handle_interactions(clear_clicks, genre_click, talent_click, ohw_click,
+                        cur_dropdown, cur_checklist, cur_slider,
+                        cur_genre, cur_artists, cur_highlighted):
+    triggered = ctx.triggered_id
+
+    # Clear everything
+    if triggered == "clear-btn":
+        return None, [], 50, None, None, None
+
+    # Linking 1: click genre line in genre-trend → brush genre in talent + OHW
+    if triggered == "genre-trend" and genre_click:
+        point = genre_click["points"][0]
+        genre_name = None
+        if point.get("customdata"):
+            genre_name = point["customdata"][0]
+        if not genre_name:
+            genre_name = point.get("fullData", {}).get("name")
+        new_genre = None if genre_name == cur_genre else genre_name
+        return cur_dropdown, cur_checklist, cur_slider, new_genre, cur_artists, cur_highlighted
+
+    # Linking 2: click artist in talent-scatter → highlight in OHW scatter
+    if triggered == "talent-scatter" and talent_click:
+        name = talent_click["points"][0].get("text")
+        new_artists = None if (cur_artists and len(cur_artists) == 1 and cur_artists[0] == name) else ([name] if name else None)
+        return cur_dropdown, cur_checklist, cur_slider, cur_genre, new_artists, cur_highlighted
+
+    # Linking 3: click artist in one-hit-scatter → highlight in talent scatter
+    if triggered == "one-hit-scatter" and ohw_click:
+        name = ohw_click["points"][0].get("text")
+        new_highlighted = None if name == cur_highlighted else name
+        return cur_dropdown, cur_checklist, cur_slider, cur_genre, cur_artists, new_highlighted
+
+    return cur_dropdown, cur_checklist, cur_slider, cur_genre, cur_artists, cur_highlighted
 
 
 # Main charts
@@ -179,11 +235,15 @@ def clear_filters(_):
     Output("revenue-genre",   "figure"),
     Output("stats-panel",     "children"),
     Output("header-badge",    "children"),
-    Input("genre-dropdown",    "value"),
-    Input("filter-checklist",  "value"),
-    Input("track-count-slider","value"),
+    Input("genre-dropdown",      "value"),
+    Input("filter-checklist",    "value"),
+    Input("track-count-slider",  "value"),
+    Input("brushed-genre",       "data"),
+    Input("brushed-artists",     "data"),
+    Input("highlighted-artist",  "data"),
 )
-def update_charts(sel_genres, checks, max_tracks):
+def update_charts(sel_genres, checks, max_tracks,
+                  brushed_genre, brushed_artists, highlighted_artist):
 
     adf = apply_filters(artists_df, sel_genres, checks or [], max_tracks)
 
@@ -192,14 +252,31 @@ def update_charts(sel_genres, checks, max_tracks):
 
     p80 = artists_df["avg_listens"].quantile(0.80)
 
-    # ── 1. Talent discovery scatter ───────────────────────────────
-    def point_color(row):
+    # Talent discovery scatter
+    adf_plot = adf.dropna(subset=["avg_listens", "track_count"])
+
+    def talent_color(row):
+        name = row["artist_name"]
+        if brushed_genre and brushed_genre not in str(row.get("genres", "")):
+            return "rgba(100,100,100,0.12)"
+        if brushed_artists and name not in brushed_artists:
+            return "rgba(100,100,100,0.12)"
+        if highlighted_artist and name == highlighted_artist:
+            return C["teal"]
         if row["is_talent"]:  return C["green"]
         if row["is_one_hit"]: return C["accent"]
         return C["muted"]
 
-    adf_plot = adf.dropna(subset=["avg_listens", "track_count"])
-    colors   = adf_plot.apply(point_color, axis=1).tolist()
+    def talent_size(row):
+        name = row["artist_name"]
+        if highlighted_artist and name == highlighted_artist:
+            return 14
+        if brushed_artists and name in brushed_artists:
+            return 10
+        return 6
+
+    colors = adf_plot.apply(talent_color, axis=1).tolist()
+    sizes  = adf_plot.apply(talent_size,  axis=1).tolist()
 
     talent_fig = go.Figure()
     talent_fig.add_shape(type="rect",
@@ -216,7 +293,7 @@ def update_charts(sel_genres, checks, max_tracks):
         x=adf_plot["track_count"],
         y=adf_plot["avg_listens"],
         mode="markers",
-        marker=dict(color=colors, size=6, opacity=0.75,
+        marker=dict(color=colors, size=sizes, opacity=0.85,
                     line=dict(width=0.5, color=C["border"])),
         text=adf_plot["artist_name"],
         customdata=adf_plot[["track_count", "avg_listens", "career_start",
@@ -238,45 +315,114 @@ def update_charts(sel_genres, checks, max_tracks):
             marker=dict(color=col, size=8),
             name=lbl, showlegend=True,
         ))
+
+    suffix = []
+    if brushed_genre:      suffix.append(f"genre: {brushed_genre}")
+    if brushed_artists:    suffix.append(f"{len(brushed_artists)} selected")
+    if highlighted_artist: suffix.append(f"↑ {highlighted_artist}")
+    talent_title = "Talent Discovery · Track Count vs Avg Listens"
+    if suffix: talent_title += "  ·  " + "  ·  ".join(suffix)
+
     talent_fig.update_layout(
-        title="Talent Discovery · Track Count vs Avg Listens",
+        title=talent_title,
         xaxis_title="Number of tracks",
-        yaxis_title="Avg listens per track",
+        yaxis_title="Avg listens per track (log scale)",
+        yaxis_type="log",
         **PT,
     )
 
-    # Line charts
+    # Genre trends over time
     if sel_genres:
-        trend_df  = trends[trends["track_genre_top"].isin(sel_genres)]
+        trend_filtered = trends[trends["track_genre_top"].isin(sel_genres)]
         top_genres = sel_genres
     else:
-        top_genres = trends["track_genre_top"].value_counts().head(8).index.tolist() # This ain´t work anymore?
+        top_genres = trends["track_genre_top"].value_counts().head(8).index.tolist() # This ain't work anymore?
+        trend_filtered = trends
 
-    genre_trend_fig = go.Figure() 
+    genre_trend_fig = go.Figure()
     for i, g in enumerate(top_genres):
         # Count the total amount of track listens per year for each genre
-        sub = (trends[trends["track_genre_top"] == g].groupby("year")["track_listens"].sum().reset_index(name="count"))
-        genre_trend_fig.add_trace(go.Scatter(
-            x=sub["year"], y=sub["count"], mode="lines", name=g,
-            line=dict(color=palette[i % len(palette)], width=2),
-            hovertemplate=f"{g} · %{{x}}: <b>%{{y}}</b> listens<extra></extra>",
-        ))
-    genre_trend_fig.update_layout(title="Genre Trends Over Time", **PT)
+        sub = (trend_filtered[trend_filtered["track_genre_top"] == g]
+               .groupby("year")["track_listens"].sum()
+               .reset_index(name="count"))
 
-    # ── 3. One-hit wonder scatter ─────────────────────────────────
-    ohw = adf.dropna(subset=["avg_listens", "max_listens"])
-    ohw_colors = [C["accent"] if v else C["muted"] for v in ohw["is_one_hit"]]
+        if brushed_genre:
+            if g == brushed_genre:
+                lw, opacity = 3, 1.0
+                color = palette[i % len(palette)]
+            else:
+                lw, opacity = 1, 0.2
+                color = "rgba(150,150,150,0.3)"
+        else:
+            lw, opacity = 2, 1.0
+            color = palette[i % len(palette)]
+
+        genre_trend_fig.add_trace(go.Scatter(
+            x=sub["year"], y=sub["count"],
+            mode="lines", name=g,
+            opacity=opacity,
+            line=dict(color=color, width=lw),
+            customdata=[[g]] * len(sub),
+            hovertemplate=f"{g} · %{{x}}: <b>%{{y:,}}</b> total listens · click to filter<extra></extra>",
+        ))
+    genre_trend_fig.update_layout(
+        title="Genre Trends Over Time",
+        yaxis_title="Total listens",
+        xaxis_title="Year",
+        **PT,
+    )
+
+    # One-hit wonder scatter
+    # Outlier detection via IQR: artist is OHW if ratio > Q3 + 1.5*IQR
+    # Artists with only 1 track are excluded
+    ohw_all = adf.dropna(subset=["avg_listens", "max_listens"]).copy()
+    ohw_all = ohw_all[ohw_all["track_count"] > 1]
+    if not ohw_all.empty:
+        Q1  = ohw_all["ratio"].quantile(0.25)
+        Q3  = ohw_all["ratio"].quantile(0.75)
+        IQR = Q3 - Q1
+        ohw_threshold = Q3 + 1.5 * IQR
+        ohw_all["is_ohw_outlier"] = ohw_all["ratio"] > ohw_threshold
+    else:
+        ohw_all["is_ohw_outlier"] = False
+
+    ohw = ohw_all
+
+    def ohw_color(row):
+        name = row["artist_name"]
+        if highlighted_artist and name == highlighted_artist:
+            return C["teal"]
+        if brushed_genre and brushed_genre not in str(row.get("genres", "")):
+            return "rgba(100,100,100,0.10)"
+        if brushed_artists:
+            if name in brushed_artists:
+                return C["accent"]
+            return "rgba(100,100,100,0.10)"
+        return C["accent"] if row["is_ohw_outlier"] else C["muted"]
+
+    def ohw_size(row):
+        name = row["artist_name"]
+        if highlighted_artist and name == highlighted_artist:
+            return 14
+        if brushed_artists and name in brushed_artists:
+            return 9
+        return 5
+
+    ohw_colors = ohw.apply(ohw_color, axis=1).tolist()
+    ohw_sizes  = ohw.apply(ohw_size,  axis=1).tolist()
+
     ohw_fig = go.Figure(go.Scatter(
         x=ohw["avg_listens"], y=ohw["max_listens"],
         mode="markers",
-        marker=dict(color=ohw_colors, size=5, opacity=0.7),
+        marker=dict(color=ohw_colors, size=ohw_sizes, opacity=0.85),
         text=ohw["artist_name"],
         customdata=ohw["ratio"].round(1).values,
         hovertemplate=(
             "<b>%{text}</b><br>"
             "Avg listens: %{x:,.0f}<br>"
             "Max listens: %{y:,.0f}<br>"
-            "Ratio: %{customdata}<extra></extra>"
+            "Ratio: %{customdata}<br>"
+            "Click to highlight in talent scatter<extra></extra>"
         ),
     ))
     max_val = ohw["max_listens"].quantile(0.99) if not ohw.empty else 1
@@ -285,6 +431,14 @@ def update_charts(sel_genres, checks, max_tracks):
         line=dict(color=C["border"], width=1, dash="dot"),
         showlegend=False, hoverinfo="skip",
     ))
+    if not ohw_all.empty:
+        ohw_fig.add_hline(
+            y=ohw_threshold,
+            line=dict(color=C["accent"], width=1, dash="dot"),
+            annotation_text=f"Outlier threshold (Q3+1.5×IQR = {ohw_threshold:,.0f})",
+            annotation_font=dict(color=C["accent"], size=9, family=C["mono"]),
+            annotation_position="top right",
+        )
     ohw_fig.update_layout(
         title="One-Hit Wonder Detection · Avg vs Max Listens",
         xaxis_title="Avg listens",
@@ -309,7 +463,7 @@ def update_charts(sel_genres, checks, max_tracks):
     emerging_fig.update_layout(title="Emerging Genres (Early-Career Artists)", **PT)
     emerging_fig.update_yaxes(categoryorder="total ascending")
 
-    # ── 5. Missing data / hidden talent signal ────────────────────
+    # Missing data / hidden talent signal
     sig = adf.dropna(subset=["avg_listens", "missing_pct"])
     sig_colors = [
         C["green"] if (row["avg_listens"] >= p80 and row["missing_pct"] > 50)
@@ -339,7 +493,7 @@ def update_charts(sel_genres, checks, max_tracks):
         **PT,
     )
 
-    # ── 6. Revenue — top artists (unsigned highlighted) ───────────
+    # Revenue — top artists (unsigned highlighted)
     rev = (adf.dropna(subset=["total_revenue"])
               .sort_values("total_revenue", ascending=False)
               .head(15))
@@ -359,7 +513,6 @@ def update_charts(sel_genres, checks, max_tracks):
         ),
         showlegend=False,
     ))
-    # invisible scatter traces just for the legend
     for lbl, col in [("No label (unsigned)", C["green"]),
                      ("Has label", C["muted"])]:
         revenue_artist_fig.add_trace(go.Scatter(
@@ -374,7 +527,7 @@ def update_charts(sel_genres, checks, max_tracks):
     )
     revenue_artist_fig.update_yaxes(categoryorder="total ascending")
 
-    # ── 7. Revenue — by genre ─────────────────────────────────────
+    # Revenue — by genre
     genre_rev = (tracks
                  .dropna(subset=["track_genre_top", "estimated_revenue"])
                  .groupby("track_genre_top")["estimated_revenue"]
@@ -401,23 +554,26 @@ def update_charts(sel_genres, checks, max_tracks):
     )
     revenue_genre_fig.update_yaxes(categoryorder="total ascending")
 
-    # ── Stats ─────────────────────────────────────────────────────
+    # Stats
     total_rev = adf["total_revenue"].sum()
     n_talent  = int(adf["is_talent"].sum())
-    n_one_hit = int(adf["is_one_hit"].sum())
+    n_one_hit = int(ohw_all["is_ohw_outlier"].sum()) if not ohw_all.empty else 0
     stats = html.Div([
-        stat_block(f"{len(adf):,}",      "artists",    C["accent"]),
-        stat_block(f"{n_talent}",         "new talent", C["green"]),
-        stat_block(f"{n_one_hit}",        "one-hit",    C["accent2"]),
-        stat_block(fmt_revenue(total_rev),"est. rev.",  C["teal"]),
+        stat_block(f"{len(adf):,}",       "artists",    C["accent"]),
+        stat_block(f"{n_talent}",          "new talent", C["green"]),
+        stat_block(f"{n_one_hit}",         "one-hit",    C["accent2"]),
+        stat_block(fmt_revenue(total_rev), "est. rev.",  C["teal"]),
     ], style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
               "gap": "6px", "marginTop": "4px"})
 
-    # ── Badge ─────────────────────────────────────────────────────
+    # Badge
     parts = []
-    if sel_genres:       parts.append(f"{len(sel_genres)} genre(s)")
-    if checks:           parts.append(" · ".join(checks))
-    if max_tracks < 50:  parts.append(f"≤{max_tracks} tracks")
+    if sel_genres:         parts.append(f"{len(sel_genres)} genre(s)")
+    if checks:             parts.append(" · ".join(checks))
+    if max_tracks < 50:    parts.append(f"≤{max_tracks} tracks")
+    if brushed_genre:      parts.append(f"genre: {brushed_genre}")
+    if brushed_artists:    parts.append(f"{len(brushed_artists)} selected")
+    if highlighted_artist: parts.append(f"↑ {highlighted_artist}")
     badge = None
     if parts:
         badge = html.Span(" · ".join(parts), style={
@@ -464,10 +620,10 @@ def update_artist_panel(talent_click, ohw_click, rev_click):
                 and not artist_tracks["artist_website"].dropna().empty else None)
 
     flags = []
-    if row["is_talent"]:    flags.append(("NEW TALENT",     C["green"]))
-    if row["is_one_hit"]:   flags.append(("ONE-HIT WONDER", C["accent"]))
-    if not row["has_label"]:flags.append(("NO LABEL",       C["teal"]))
-    if row["early_career"]: flags.append(("EARLY CAREER",   C["accent2"]))
+    if row["is_talent"]:     flags.append(("NEW TALENT",     C["green"]))
+    if row["is_one_hit"]:    flags.append(("ONE-HIT WONDER", C["accent"]))
+    if not row["has_label"]: flags.append(("NO LABEL",       C["teal"]))
+    if row["early_career"]:  flags.append(("EARLY CAREER",   C["accent2"]))
 
     def metric_row(lbl, value):
         return html.Div([
@@ -478,11 +634,11 @@ def update_artist_panel(talent_click, ohw_click, rev_click):
         ], style={"padding": "7px 0", "borderBottom": f"1px solid {C['border']}",
                   "overflow": "hidden"})
 
-    avg_l   = f'{row["avg_listens"]:,.0f}'  if pd.notna(row["avg_listens"])   else "—"
-    max_l   = f'{row["max_listens"]:,.0f}'  if pd.notna(row["max_listens"])   else "—"
-    ratio   = f'{row["ratio"]:.1f}x'        if pd.notna(row["ratio"])         else "—"
-    c_start = str(int(row["career_start"])) if pd.notna(row["career_start"])  else "—"
-    miss    = f'{row["missing_pct"]:.1f}%'  if pd.notna(row["missing_pct"])   else "—"
+    avg_l   = f'{row["avg_listens"]:,.0f}'  if pd.notna(row["avg_listens"])  else "—"
+    max_l   = f'{row["max_listens"]:,.0f}'  if pd.notna(row["max_listens"])  else "—"
+    ratio   = f'{row["ratio"]:.1f}x'        if pd.notna(row["ratio"])        else "—"
+    c_start = str(int(row["career_start"])) if pd.notna(row["career_start"]) else "—"
+    miss    = f'{row["missing_pct"]:.1f}%'  if pd.notna(row["missing_pct"])  else "—"
     t_rev   = fmt_revenue(row["total_revenue"])
     a_rev   = fmt_revenue(row["avg_revenue"])
 

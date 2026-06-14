@@ -1,5 +1,4 @@
 
-# missing docstring -Xander
 def apply_filters(adf, sel_genres, checks, max_tracks):
     df = adf.copy()
     if sel_genres:
